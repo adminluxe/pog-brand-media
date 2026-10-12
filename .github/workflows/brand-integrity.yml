@@ -1,0 +1,53 @@
+name: Brand media integrity and publish safety
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'assets/**'
+      - '.github/workflows/brand-integrity.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'assets/**'
+      - '.github/workflows/brand-integrity.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-public-media:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout with immutable action and no stored credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify published media package and SHA-256 manifest
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          DIR='assets/2026-10/pog-visual-v1'
+          test -d "$DIR"
+          (
+            cd "$DIR"
+            test -f QA7_PUBLIC_RELEASE_SHA256SUMS.txt
+            # Each asset and its content must match the previously released
+            # checksums. Any edited or added asset needs a reviewed new manifest.
+            sha256sum --strict --check QA7_PUBLIC_RELEASE_SHA256SUMS.txt >/dev/null
+            listed="$(awk 'NF == 2 && $2 ~ /\.png$/ {print $2}' QA7_PUBLIC_RELEASE_SHA256SUMS.txt | sort -u)"
+            actual="$(find . -maxdepth 1 -type f -name '*.png' -printf '%f\n' | sort -u)"
+            test "$listed" = "$actual"
+          )
+          echo 'BRAND_ASSETS_SHA256=PASS'
+          echo 'BRAND_ASSETS_COMPLETE=PASS'
+      - name: Reject executable/credential files in public asset directories
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if git ls-files -z assets | grep -zEi '(^|/)\.env($|\.)|\.(pem|p12|pfx|key|exe|dll|sh|ps1)$' >/dev/null; then
+            echo 'BRAND_ASSETS_UNSAFE_TRACKED_FILE=BLOCK'
+            exit 1
+          fi
+          echo 'BRAND_ASSETS_UNSAFE_TRACKED_FILE=NONE'
